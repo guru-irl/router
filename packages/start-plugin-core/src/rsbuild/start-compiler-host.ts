@@ -97,6 +97,76 @@ function readServerFnBuildInfo(
   return result.data.serverFnsById
 }
 
+interface ModuleWithServerFns {
+  module: Rspack.Module
+  serverFnsById: Record<string, ServerFn>
+}
+
+interface ServerFnReplayState {
+  /**
+   * Newer Rspack versions return a lazy view from `compilation.modules`, with
+   * a `has()` that needs no JS object per module. Older versions return a new
+   * Set, which creates one for every module on each access.
+   */
+  lazyModules: boolean
+  /** Modules with server function metadata, by module identifier. */
+  modulesWithServerFns: Map<string, ModuleWithServerFns>
+}
+
+/**
+ * Finds the modules of a compilation that carry server function metadata.
+ *
+ * The first compilation of each compiler scans every module, since modules
+ * restored from the persistent cache do not run loaders. When
+ * `compilation.modules` is lazy, later compilations only read the modules
+ * added or rebuilt in that compilation and drop tracked modules that left the
+ * module graph. Otherwise every compilation is scanned.
+ */
+function collectModulesWithServerFns(
+  compilation: Rspack.Compilation,
+  previous: ServerFnReplayState | undefined,
+): ServerFnReplayState {
+  const modules = compilation.modules
+
+  if (previous?.lazyModules) {
+    const tracked = previous.modulesWithServerFns
+
+    for (const module of compilation.builtModules) {
+      const identifier = module.identifier()
+      const serverFnsById = readServerFnBuildInfo(module)
+
+      if (serverFnsById) {
+        tracked.set(identifier, { module, serverFnsById })
+      } else {
+        tracked.delete(identifier)
+      }
+    }
+
+    for (const [identifier, { module }] of tracked) {
+      if (!modules.has(module)) {
+        tracked.delete(identifier)
+      }
+    }
+
+    return previous
+  }
+
+  const modulesWithServerFns = new Map<string, ModuleWithServerFns>()
+
+  for (const module of modules) {
+    const serverFnsById = readServerFnBuildInfo(module)
+
+    if (serverFnsById) {
+      modulesWithServerFns.set(module.identifier(), { module, serverFnsById })
+    }
+  }
+
+  return {
+    lazyModules: !(modules instanceof Set),
+    modulesWithServerFns,
+  }
+}
+
 function setServerFnBuildInfoLoaderContext(
   loaderContext: Rspack.LoaderContext & ServerFnBuildInfoLoaderContext,
   module: Rspack.Module,
@@ -413,6 +483,8 @@ export function registerStartCompilerTransforms(
 
     config.plugins.push({
       apply(compiler: Rspack.Compiler) {
+        let replayState: ServerFnReplayState | undefined
+
         if (compiler.inputFileSystem) {
           inputFileSystems.set(utils.environment.name, compiler.inputFileSystem)
         }
@@ -449,15 +521,14 @@ export function registerStartCompilerTransforms(
               return
             }
 
+            replayState = collectModulesWithServerFns(compilation, replayState)
+
             const restoredServerFnsById: Record<string, ServerFn> = {}
 
-            for (const module of compilation.modules) {
-              const metadata = readServerFnBuildInfo(module)
-              if (!metadata) {
-                continue
-              }
-
-              mergeServerFnsById(restoredServerFnsById, metadata)
+            for (const {
+              serverFnsById,
+            } of replayState.modulesWithServerFns.values()) {
+              mergeServerFnsById(restoredServerFnsById, serverFnsById)
             }
 
             serverFnsByEnvironment.set(

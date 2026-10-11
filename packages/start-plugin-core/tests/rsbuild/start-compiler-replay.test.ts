@@ -5,6 +5,11 @@ import type { RsbuildPluginAPI } from '@rsbuild/core'
 
 type Tap = (...args: Array<any>) => unknown
 
+interface FakeModule {
+  identifier?: () => string
+  buildInfo: Record<string, unknown>
+}
+
 function createHook() {
   const taps: Array<Tap> = []
   return {
@@ -19,8 +24,9 @@ function createHook() {
   }
 }
 
-function serverFnModule(id: string) {
+function serverFnModule(id: string): FakeModule {
   return {
+    identifier: () => `/app/src/${id}.ts`,
     buildInfo: {
       [SERVER_FN_BUILD_INFO_FIELD]: {
         version: 1,
@@ -35,6 +41,10 @@ function serverFnModule(id: string) {
       },
     },
   }
+}
+
+function plainModule(identifier: string): FakeModule {
+  return { identifier: () => identifier, buildInfo: {} }
 }
 
 function setup() {
@@ -83,23 +93,55 @@ function setup() {
     plugin.apply(compiler)
   }
 
-  const finishMake = (
-    modules: Array<{ buildInfo: Record<string, unknown> }>,
+  // Released Rspack versions return a new Set from compilation.modules.
+  const finishMake = (modules: Array<FakeModule>) => {
+    compiler.hooks.finishMake.call({ compiler, modules: new Set(modules) })
+  }
+
+  // Newer Rspack versions return a lazy view that is not a Set, and list the
+  // modules added or rebuilt in the compilation in builtModules.
+  const finishLazyMake = (
+    modules: Array<FakeModule>,
+    builtModules: Array<FakeModule>,
   ) => {
-    compiler.hooks.finishMake.call({ compiler, modules })
+    const moduleSet = new Set(modules)
+    // Like Rspack, has() looks modules up by identifier, so a module object
+    // from an earlier compilation still counts after the module is rebuilt.
+    const identifiers = new Set(modules.map((module) => module.identifier?.()))
+    let iterations = 0
+    const lazyModules = {
+      has: (module: FakeModule) => identifiers.has(module.identifier?.()),
+      [Symbol.iterator]: () => {
+        iterations++
+        return moduleSet.values()
+      },
+    }
+    compiler.hooks.finishMake.call({
+      compiler,
+      modules: lazyModules,
+      builtModules: new Set(builtModules),
+    })
+    return { iterations }
   }
 
   // Rspack copies finishMake taps into child compilers (for example the one
   // html-rspack-plugin creates for a template), so the same tap also runs for
   // a child compilation that only contains the child's modules.
   const childCompiler = { name: 'child-compiler' }
-  const finishChildMake = (
-    modules: Array<{ buildInfo: Record<string, unknown> }>,
-  ) => {
-    compiler.hooks.finishMake.call({ compiler: childCompiler, modules })
+  const finishChildMake = (modules: Array<FakeModule>) => {
+    compiler.hooks.finishMake.call({
+      compiler: childCompiler,
+      modules: new Set(modules),
+    })
   }
 
-  return { serverFnsById, finishMake, finishChildMake, onServerFnsByIdChange }
+  return {
+    serverFnsById,
+    finishMake,
+    finishLazyMake,
+    finishChildMake,
+    onServerFnsByIdChange,
+  }
 }
 
 describe('rsbuild server function metadata replay', () => {
@@ -146,5 +188,41 @@ describe('rsbuild server function metadata replay', () => {
 
     expect(Object.keys(serverFnsById)).toEqual(['a'])
     expect(onServerFnsByIdChange).toHaveBeenCalledTimes(changesAfterParent)
+  })
+
+  describe('when compilation.modules is lazy', () => {
+    it('scans every module only on the first compilation', () => {
+      const { serverFnsById, finishLazyMake } = setup()
+      const a = serverFnModule('a')
+      const plain = plainModule('/app/src/plain.ts')
+
+      expect(finishLazyMake([a, plain], [a, plain]).iterations).toBe(1)
+      expect(finishLazyMake([a, plain], []).iterations).toBe(0)
+      expect(Object.keys(serverFnsById)).toEqual(['a'])
+    })
+
+    it('reads metadata from modules added or rebuilt in the compilation', () => {
+      const { serverFnsById, finishLazyMake } = setup()
+      const a = serverFnModule('a')
+      const b = serverFnModule('b')
+
+      finishLazyMake([a], [a])
+      finishLazyMake([a, b], [b])
+      expect(Object.keys(serverFnsById).sort()).toEqual(['a', 'b'])
+
+      const rebuiltA = plainModule(a.identifier!())
+      finishLazyMake([rebuiltA, b], [rebuiltA])
+      expect(Object.keys(serverFnsById)).toEqual(['b'])
+    })
+
+    it('drops server functions whose module left the module graph', () => {
+      const { serverFnsById, finishLazyMake } = setup()
+      const a = serverFnModule('a')
+      const b = serverFnModule('b')
+
+      finishLazyMake([a, b], [a, b])
+      finishLazyMake([b], [])
+      expect(Object.keys(serverFnsById)).toEqual(['b'])
+    })
   })
 })

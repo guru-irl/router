@@ -118,13 +118,16 @@ Rspack copies `finishMake` taps into child compilers, for example the one `html-
 
 At that point Rspack has built or restored the module graph for the environment, and module `buildInfo` is available. The hook:
 
-1. Iterates over `compilation.modules`.
-2. Reads `module.buildInfo['tanstack.start.serverFns']` and skips modules without it.
-3. Validates the payload with the versioned schema.
-4. Merges valid module metadata into an environment snapshot.
-5. Stores the snapshot in `serverFnsByEnvironment`.
-6. Rebuilds the shared `serverFnsById` registry from all environment snapshots.
-7. Notifies virtual modules that resolver content may have changed.
+1. Finds the modules that carry `module.buildInfo['tanstack.start.serverFns']` (see below), skipping modules without it.
+2. Validates each payload with the versioned schema.
+3. Merges valid module metadata into an environment snapshot.
+4. Stores the snapshot in `serverFnsByEnvironment`.
+5. Rebuilds the shared `serverFnsById` registry from all environment snapshots.
+6. Notifies virtual modules that resolver content may have changed.
+
+The first compilation of each compiler scans every module in `compilation.modules`. It has to: modules restored from the persistent cache do not run loaders, so their metadata is only reachable through `buildInfo`. The hook keeps the modules that carry metadata, by module identifier.
+
+Later compilations depend on the Rspack version. Newer versions return a lazy view from `compilation.modules` (not a `Set`) with a `has()` that needs no JS object per module. With that view, the hook only reads `compilation.builtModules`, the modules added or rebuilt in this compilation, and drops tracked modules for which `compilation.modules.has()` is false. A module's `buildInfo` only changes when it is built or restored, and Rspack only restores modules in a compiler's first compilation, so this finds the same modules as a full scan. Older versions return a new `Set` from `compilation.modules`, which creates a JS object for every module anyway, so the hook scans every module in every compilation.
 
 The shared registry is rebuilt from snapshots instead of being append-only. This is what lets deleted or renamed server functions disappear after watch rebuilds or warm-cache restores.
 
