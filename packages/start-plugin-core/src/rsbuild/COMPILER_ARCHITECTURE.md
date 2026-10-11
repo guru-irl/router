@@ -114,6 +114,8 @@ This prevents stale server-function entries from surviving on a cached module's 
 
 Each relevant compiler installs a `finishMake` hook at stage `-20`.
 
+Rspack copies `finishMake` taps into child compilers, for example the one `html-rspack-plugin` creates to compile a template. A child compilation only contains the child's modules, so the hook returns early for it and the environment's snapshot is left alone.
+
 At that point Rspack has built or restored the module graph for the environment, and module `buildInfo` is available. The hook:
 
 1. Iterates over `compilation.modules`.

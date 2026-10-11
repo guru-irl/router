@@ -441,6 +441,14 @@ export function registerStartCompilerTransforms(
             stage: -20,
           },
           (compilation) => {
+            // Rspack copies finishMake taps into child compilers, such as the
+            // one html-rspack-plugin creates. A child compilation only holds
+            // its own modules, so replaying it would replace this
+            // environment's server functions.
+            if (compilation.compiler !== compiler) {
+              return
+            }
+
             const restoredServerFnsById: Record<string, ServerFn> = {}
 
             for (const module of compilation.modules) {
