@@ -38,6 +38,7 @@ function serverFnModule(id: string) {
 }
 
 function setup() {
+  const onServerFnsByIdChange = vi.fn()
   const modifyRspackConfigCallbacks: Array<Tap> = []
   const api = {
     context: { action: 'build' },
@@ -52,6 +53,7 @@ function setup() {
     root: '/app',
     environments: [{ name: 'client', type: 'client' }],
     providerEnvName: 'ssr',
+    onServerFnsByIdChange,
   })
 
   const config = {
@@ -87,7 +89,17 @@ function setup() {
     compiler.hooks.finishMake.call({ compiler, modules })
   }
 
-  return { serverFnsById, finishMake }
+  // Rspack copies finishMake taps into child compilers (for example the one
+  // html-rspack-plugin creates for a template), so the same tap also runs for
+  // a child compilation that only contains the child's modules.
+  const childCompiler = { name: 'child-compiler' }
+  const finishChildMake = (
+    modules: Array<{ buildInfo: Record<string, unknown> }>,
+  ) => {
+    compiler.hooks.finishMake.call({ compiler: childCompiler, modules })
+  }
+
+  return { serverFnsById, finishMake, finishChildMake, onServerFnsByIdChange }
 }
 
 describe('rsbuild server function metadata replay', () => {
@@ -117,5 +129,22 @@ describe('rsbuild server function metadata replay', () => {
 
     finishMake([serverFnModule('b')])
     expect(Object.keys(serverFnsById)).toEqual(['b'])
+  })
+
+  it('ignores child compilations, which only see their own modules', () => {
+    const {
+      serverFnsById,
+      finishMake,
+      finishChildMake,
+      onServerFnsByIdChange,
+    } = setup()
+
+    finishMake([serverFnModule('a')])
+    const changesAfterParent = onServerFnsByIdChange.mock.calls.length
+
+    finishChildMake([{ buildInfo: {} }])
+
+    expect(Object.keys(serverFnsById)).toEqual(['a'])
+    expect(onServerFnsByIdChange).toHaveBeenCalledTimes(changesAfterParent)
   })
 })
