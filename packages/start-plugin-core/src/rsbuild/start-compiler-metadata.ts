@@ -1,18 +1,10 @@
 import type { ServerFn } from '../start-compiler/types'
 
 export const SERVER_FN_BUILD_INFO_FIELD = 'tanstack.start.serverFns'
-export const SERVER_FN_BUILD_INFO_CONTEXT_KEY =
-  'tanstack.start.setServerFnBuildInfo'
 
 export type ServerFnBuildInfo = {
   version: 1
   serverFnsById: Record<string, ServerFn>
-}
-
-export type SetServerFnBuildInfo = (metadata: ServerFnBuildInfo | null) => void
-
-export type ServerFnBuildInfoLoaderContext = {
-  [SERVER_FN_BUILD_INFO_CONTEXT_KEY]?: SetServerFnBuildInfo
 }
 
 export type ServerFnMetadataLoaderOptions = {
@@ -25,8 +17,28 @@ export type ServerFnMetadataLoaderOptions = {
   resourcesWithMetadata: Set<string>
 }
 
+const EMPTY_SERVER_FN_BUILD_INFO: ServerFnBuildInfo = {
+  version: 1,
+  serverFnsById: {},
+}
+
 export function hasServerFns(
   serverFnsById: ServerFnBuildInfo['serverFnsById'],
 ): boolean {
   return Object.keys(serverFnsById).length > 0
+}
+
+/**
+ * Writes discovered metadata to a module's `buildInfo`, or replaces metadata
+ * left by an earlier build with an empty payload.
+ */
+export function writeServerFnBuildInfo(
+  buildInfo: Record<string, unknown>,
+  metadata: ServerFnBuildInfo | null,
+): void {
+  if (metadata) {
+    buildInfo[SERVER_FN_BUILD_INFO_FIELD] = metadata
+  } else if (buildInfo[SERVER_FN_BUILD_INFO_FIELD]) {
+    buildInfo[SERVER_FN_BUILD_INFO_FIELD] = EMPTY_SERVER_FN_BUILD_INFO
+  }
 }

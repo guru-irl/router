@@ -84,9 +84,10 @@ Rspack persists custom `module.buildInfo` fields. To write metadata there, Start
 1. `start-compiler-host.ts` adds a rule with `enforce: 'post'` for Start transformable modules.
 2. The rule points to the emitted `start-compiler-metadata-loader.js` file.
 3. The loader receives the environment's pending metadata map through loader options.
-4. A public `NormalModule.getCompilationHooks(compilation).loader` hook adds a setter to the loader context.
-5. The loader reads metadata for `this.resource` and calls the setter.
-6. The setter writes to `module.buildInfo['tanstack.start.serverFns']`.
+4. The loader reads metadata for `this.resource`.
+5. For a module with new metadata, or with metadata from an earlier build, the loader writes `this._module.buildInfo['tanstack.start.serverFns']`.
+
+The loader reaches the module through `this._module` instead of a `NormalModule.getCompilationHooks(compilation).loader` tap. Rspack calls loader hook taps for every module in every compilation and has to create the JS module object for each call. `_module` is the same object the hook would receive, and the loader reads it only for the few modules that have server function metadata. Rspack marks `_module` as deprecated, so this is the one place that uses it.
 
 Only string-keyed, JSON-serializable `buildInfo` fields are used. Rspack persists those fields with the module cache. Symbol keys and private cache internals are intentionally avoided.
 
@@ -112,7 +113,7 @@ This prevents stale server-function entries from surviving on a cached module's 
 
 Rspack keeps a module's custom `buildInfo` fields across rebuilds in the same process, so this clearing is required in watch mode. A module rebuilt in a new process starts with fresh `buildInfo`.
 
-The loader therefore only calls the setter for a module that has new metadata or still carries metadata from an earlier build. Start tracks the second group per environment by resource: the loader records modules it writes metadata to, and the warm cache replay records restored modules. Every other module is left untouched, so its `buildInfo` is never read or written.
+The loader therefore only writes `buildInfo` for a module that has new metadata or still carries metadata from an earlier build. Start tracks the second group per environment by resource: the loader records modules it writes metadata to, and the warm cache replay records restored modules. Every other module is left untouched, so its `buildInfo` is never read or written.
 
 ## Warm Cache Replay
 
@@ -179,14 +180,14 @@ The implementation uses Rsbuild/Rspack integration points instead of cache inter
 - Rsbuild transform `ctx.resolve()` for module resolution.
 - Rspack `compiler.inputFileSystem` for source reads.
 - Rspack loaders for access to the loader pipeline.
-- Rspack `NormalModule.getCompilationHooks(compilation).loader` to extend loader context.
+- Rspack loader context `_module`, only for modules with server function metadata.
 - Rspack `module.buildInfo` for module-scoped persisted metadata.
 - Rspack `compiler.hooks.finishMake` for module graph replay and resolver rebuild ordering.
 - Rspack `compilation.rebuildModule()` through the local `rebuildModulesContaining()` helper.
 - Rspack `MultiCompiler.setDependencies()` for non-RSC compiler ordering.
 - Rspack `experiments.VirtualModulesPlugin` for virtual module content.
 
-The implementation avoids private persistent-cache files, direct cache mutation, direct `_module` access from loaders, global handoff state, and disabling module caching with `this.cacheable(false)`.
+The implementation avoids private persistent-cache files, direct cache mutation, global handoff state, and disabling module caching with `this.cacheable(false)`.
 
 ## When A New Server Function Is Compiled
 

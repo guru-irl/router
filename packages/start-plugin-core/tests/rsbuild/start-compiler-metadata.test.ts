@@ -149,6 +149,13 @@ function setup() {
 }
 
 describe('rsbuild server function metadata loader', () => {
+  it('does not tap the NormalModule loader hook', () => {
+    const { startCompilation, getCompilationHooks } = setup()
+    startCompilation()
+
+    expect(getCompilationHooks).not.toHaveBeenCalled()
+  })
+
   it('does not touch modules without server function metadata', () => {
     const { startCompilation, runMetadataLoader } = setup()
     startCompilation()

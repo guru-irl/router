@@ -14,15 +14,11 @@ import {
 import { cleanId } from '../start-compiler/utils'
 import { createHydrateCompilerPlugin } from '../hydrate-when-transform'
 import {
-  SERVER_FN_BUILD_INFO_CONTEXT_KEY,
   SERVER_FN_BUILD_INFO_FIELD,
   hasServerFns,
 } from './start-compiler-metadata'
 import type { RsbuildPluginAPI, Rspack } from '@rsbuild/core'
-import type {
-  ServerFnBuildInfo,
-  ServerFnBuildInfoLoaderContext,
-} from './start-compiler-metadata'
+import type { ServerFnBuildInfo } from './start-compiler-metadata'
 import type {
   CompileStartFrameworkOptions,
   StartCompilerImportTransform,
@@ -71,10 +67,6 @@ const rsbuildDevServerFnModuleSpecifierEncoder: DevServerFnModuleSpecifierEncode
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const metadataLoaderFilename = 'start-compiler-metadata-loader.js'
-const EMPTY_SERVER_FN_BUILD_INFO: ServerFnBuildInfo = {
-  version: 1,
-  serverFnsById: {},
-}
 
 function resolveMetadataLoader(): string {
   return resolve(currentDir, metadataLoaderFilename)
@@ -91,19 +83,6 @@ function readServerFnBuildInfo(
   }
 
   return result.data.serverFnsById
-}
-
-function setServerFnBuildInfoLoaderContext(
-  loaderContext: Rspack.LoaderContext & ServerFnBuildInfoLoaderContext,
-  module: Rspack.Module,
-) {
-  loaderContext[SERVER_FN_BUILD_INFO_CONTEXT_KEY] = (metadata) => {
-    if (metadata) {
-      module.buildInfo[SERVER_FN_BUILD_INFO_FIELD] = metadata
-    } else if (module.buildInfo[SERVER_FN_BUILD_INFO_FIELD]) {
-      module.buildInfo[SERVER_FN_BUILD_INFO_FIELD] = EMPTY_SERVER_FN_BUILD_INFO
-    }
-  }
 }
 
 function warnTransformContext(
@@ -430,20 +409,6 @@ export function registerStartCompilerTransforms(
         if (compiler.inputFileSystem) {
           inputFileSystems.set(utils.environment.name, compiler.inputFileSystem)
         }
-
-        compiler.hooks.compilation.tap(
-          'TanStackStartCompilerMetadataLoaderContext',
-          (compilation) => {
-            utils.rspack.NormalModule.getCompilationHooks(
-              compilation,
-            ).loader.tap(
-              'TanStackStartCompilerMetadataLoaderContext',
-              (loaderContext, module) => {
-                setServerFnBuildInfoLoaderContext(loaderContext, module)
-              },
-            )
-          },
-        )
 
         compiler.hooks.compile.tap('TanStackStartCompilerMetadataCleanup', () =>
           getServerFnMetadata(utils.environment.name).clear(),
