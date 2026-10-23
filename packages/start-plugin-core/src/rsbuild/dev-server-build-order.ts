@@ -35,12 +35,12 @@ function createDeferred(): Deferred {
  *
  * - The first server build starts after the first client build.
  * - Later builds run at the same time. Before the server merges server
- *   functions, it waits until a client compilation in progress has merged its
- *   own, so the server function resolver includes them.
+ *   functions, it waits until a pending or running client compilation has
+ *   merged its own, so the server function resolver includes them.
  * - When the resolver changes and no server build will pick it up, the server
  *   rebuilds.
- * - The server stops waiting when the client compilation is invalidated,
- *   finishes or fails, or when its watcher closes.
+ * - The server stops waiting when the client compilation finishes or fails,
+ *   or when its watcher closes.
  */
 export function orderDevServerBuilds(
   client: Rspack.Compiler,
@@ -63,14 +63,17 @@ export function orderDevServerBuilds(
   }
 
   let clientCompilation: Deferred | undefined
+  const armClientCompilation = () => {
+    clientCompilation ??= createDeferred()
+  }
   const releaseClientCompilation = () => {
     clientCompilation?.resolve()
     clientCompilation = undefined
   }
 
-  client.hooks.watchRun.tap(PLUGIN_NAME, () => {
-    clientCompilation ??= createDeferred()
-  })
+  // `invalid` runs on the first file change, before either compiler starts.
+  client.hooks.invalid.tap(PLUGIN_NAME, armClientCompilation)
+  client.hooks.watchRun.tap(PLUGIN_NAME, armClientCompilation)
   client.hooks.finishMake.tap(
     { name: PLUGIN_NAME, stage: CLIENT_MERGED_STAGE },
     (compilation) => {
@@ -81,7 +84,6 @@ export function orderDevServerBuilds(
       }
     },
   )
-  client.hooks.invalid.tap(PLUGIN_NAME, releaseClientCompilation)
   client.hooks.done.tap(PLUGIN_NAME, releaseClientCompilation)
   client.hooks.failed.tap(PLUGIN_NAME, releaseClientCompilation)
   client.hooks.watchClose.tap(PLUGIN_NAME, releaseClientCompilation)

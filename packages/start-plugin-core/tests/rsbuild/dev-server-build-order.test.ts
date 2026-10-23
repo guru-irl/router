@@ -130,6 +130,19 @@ describe('orderDevServerBuilds', () => {
     expect(merges).toEqual(['client', 'server'])
   })
 
+  test('merges server functions on the server after a client compilation that has not started', async () => {
+    const { client, server } = setup()
+    await finishFirstClientBuild(client)
+
+    await client.hooks.invalid.call()
+    const serverFinishMake = server.hooks.finishMake.call({ compiler: server })
+    await client.hooks.watchRun.call(client)
+    expect(await isSettled(serverFinishMake)).toBe(false)
+
+    await client.hooks.finishMake.call({ compiler: client })
+    expect(await isSettled(serverFinishMake)).toBe(true)
+  })
+
   test('does not hold the server when the client is not building', async () => {
     const { client, server } = setup()
     await finishFirstClientBuild(client)
@@ -156,7 +169,7 @@ describe('orderDevServerBuilds', () => {
     expect(await isSettled(serverFinishMake)).toBe(true)
   })
 
-  test.each(['invalid', 'done', 'failed', 'watchClose'] as const)(
+  test.each(['done', 'failed', 'watchClose'] as const)(
     'releases the server when the client hook %s runs',
     async (hook) => {
       const { client, server } = setup()
@@ -342,6 +355,29 @@ describe('orderDevServerBuilds', () => {
         await serverFinishMake
       })
       await serverRebuild
+      await client.hooks.done.call({})
+      await client.hooks.afterDone.call({})
+
+      expect(rebuiltWith).toEqual([[], ['added']])
+      expect(server.watching.invalidate).not.toHaveBeenCalled()
+    })
+
+    test('rebuilds the server resolver once when the server reaches its merge before the client starts', async () => {
+      const context = setupWithResolver()
+      const { client, server, rebuiltWith, findOnClient } = context
+      await firstBuild(context)
+
+      findOnClient('added')
+      await client.hooks.invalid.call()
+      await serverBuild(server, async () => {
+        const serverFinishMake = server.hooks.finishMake.call({
+          compiler: server,
+        })
+        await flush()
+        await client.hooks.watchRun.call(client)
+        await client.hooks.finishMake.call({ compiler: client })
+        await serverFinishMake
+      })
       await client.hooks.done.call({})
       await client.hooks.afterDone.call({})
 
