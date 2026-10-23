@@ -14,6 +14,7 @@ export const tanstackStartRsbuildOptionsSchema =
       rsbuild: z
         .object({
           installDevServerMiddleware: z.boolean().optional(),
+          concurrentDevRebuilds: z.boolean().optional(),
           client: z
             .object({
               output: rsbuildClientOutputSchema.optional().default('module'),
@@ -42,6 +43,14 @@ export type TanStackStartRsbuildInputConfig = z.input<
 > & {
   rsbuild?: {
     installDevServerMiddleware?: boolean
+    /**
+     * In development, rebuild the server environment at the same time as the
+     * client environment instead of after it. The first build still runs the
+     * server after the client.
+     *
+     * @default true
+     */
+    concurrentDevRebuilds?: boolean
     client?: {
       output?: z.input<typeof rsbuildClientOutputSchema>
     }

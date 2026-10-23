@@ -11,6 +11,11 @@ export interface ServerFnResolverRebuildOptions {
   rebuildResolver: (compilation: Rspack.Compilation) => Promise<void>
 }
 
+export interface ServerFnResolverRebuild {
+  /** Whether the resolver was written after this compiler last rebuilt it. */
+  isStale: () => boolean
+}
+
 /**
  * Rebuilds the server function resolver module at finishMake stage -10,
  * after stage -20 has refreshed the server function registry.
@@ -23,7 +28,7 @@ export interface ServerFnResolverRebuildOptions {
 export function tapServerFnResolverRebuild(
   compiler: Rspack.Compiler,
   options: ServerFnResolverRebuildOptions,
-): void {
+): ServerFnResolverRebuild {
   // Write count of the resolver content this compiler last rebuilt from.
   let rebuiltAtWriteCount: number | undefined
 
@@ -50,4 +55,8 @@ export function tapServerFnResolverRebuild(
       rebuiltAtWriteCount = writeCount
     },
   )
+
+  return {
+    isStale: () => options.getResolverWriteCount() !== rebuiltAtWriteCount,
+  }
 }

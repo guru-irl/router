@@ -28,11 +28,13 @@ import {
 import { createServerSetup } from './server-middleware'
 import { registerClientBuildCapture } from './normalized-client-build'
 import { tapServerFnResolverRebuild } from './server-fn-resolver-rebuild'
+import { orderDevServerBuilds } from './dev-server-build-order'
 import { registerRouterPlugins } from './start-router-plugin'
 import { postBuildWithRsbuild } from './post-build'
 import { enableSwcReactServerComponents } from './swc-rsc'
 import type { ServerFn } from '../start-compiler/types'
 import type { TanStackStartRsbuildPluginCoreOptions } from './types'
+import type { ServerFnResolverRebuild } from './server-fn-resolver-rebuild'
 import type {
   ModifyRspackConfigFn,
   RsbuildDevServer,
@@ -334,6 +336,11 @@ export function tanStackStartRsbuild(
       })
       updateServerFnResolver = virtualModuleState.updateServerFnResolver
 
+      const serverFnResolverRebuilds = new Map<
+        string,
+        ServerFnResolverRebuild
+      >()
+
       if (!rscEnabled) {
         api.modifyRspackConfig((config, utils) => {
           if (
@@ -347,7 +354,7 @@ export function tanStackStartRsbuild(
           const environmentName = utils.environment.name
           config.plugins.push({
             apply(compiler: RspackCompiler) {
-              tapServerFnResolverRebuild(compiler, {
+              const resolverRebuild = tapServerFnResolverRebuild(compiler, {
                 name: 'TanStackStartServerFnResolverRebuild',
                 updateResolver: () => {
                   virtualModuleState.updateServerFnResolver()
@@ -362,6 +369,7 @@ export function tanStackStartRsbuild(
                     virtualModuleState.serverFnResolverPath,
                   ),
               })
+              serverFnResolverRebuilds.set(environmentName, resolverRebuild)
             },
           })
         })
@@ -623,6 +631,11 @@ export function tanStackStartRsbuild(
       //    so that the manifest virtual module has real client build stats.
       //    Uses rspack MultiCompiler.setDependencies() under the hood.
       //
+      //    In development, only the first server build waits for the client
+      //    (see dev-server-build-order.ts), unless
+      //    `rsbuild.concurrentDevRebuilds` is false or another environment
+      //    provides the server functions.
+      //
       //    IMPORTANT: When RSC is enabled we must NOT set dependencies.
       //    The RSC Coordinator already orchestrates server↔client
       //    compilation ordering by interleaving phases within compiler
@@ -633,14 +646,32 @@ export function tanStackStartRsbuild(
       //    server's entries phase completes — neither can start.
       // ---------------------------------------------------------------
       if (!rscEnabled) {
+        const concurrentDevRebuilds =
+          api.context.action === 'dev' &&
+          startPluginOpts.rsbuild?.concurrentDevRebuilds !== false &&
+          serverFnProviderEnv === RSBUILD_ENVIRONMENT_NAMES.server
+
         api.onAfterCreateCompiler(({ compiler }) => {
           // MultiCompiler has a `compilers` array; single compiler does not
           if ('compilers' in compiler) {
+            const clientCompiler = compiler.compilers.find(
+              (c) => c.name === RSBUILD_ENVIRONMENT_NAMES.client,
+            )
             for (const environmentName of startCompilerServerEnvironmentNames) {
               const serverCompiler = compiler.compilers.find(
                 (c) => c.name === environmentName,
               )
               if (serverCompiler) {
+                if (concurrentDevRebuilds && clientCompiler) {
+                  orderDevServerBuilds(clientCompiler, serverCompiler, {
+                    isServerResolverStale: () =>
+                      serverFnResolverRebuilds
+                        .get(environmentName)
+                        ?.isStale() ?? false,
+                  })
+                  continue
+                }
+
                 const dependencies: Array<string> = [
                   RSBUILD_ENVIRONMENT_NAMES.client,
                 ]
