@@ -110,6 +110,11 @@ export function tanStackStartRsbuild(
       const startCompilerServerEnvironmentNames = startCompilerEnvironments
         .filter((env) => env.type === 'server')
         .map((env) => env.name)
+      const concurrentDevRebuilds =
+        !rscEnabled &&
+        api.context.action === 'dev' &&
+        startPluginOpts.rsbuild?.concurrentDevRebuilds !== false &&
+        serverFnProviderEnv === RSBUILD_ENVIRONMENT_NAMES.server
 
       // ---------------------------------------------------------------
       // 1. modifyRsbuildConfig — resolve config, set up environments
@@ -272,6 +277,7 @@ export function tanStackStartRsbuild(
                     serverOutputDirectory:
                       resolvedStartConfig.outputDirectories.server,
                     publicBase: resolvedStartConfig.basePaths.publicBase,
+                    waitForClientBuild: concurrentDevRebuilds,
                   }),
                 }
               : {}),
@@ -646,11 +652,6 @@ export function tanStackStartRsbuild(
       //    server's entries phase completes — neither can start.
       // ---------------------------------------------------------------
       if (!rscEnabled) {
-        const concurrentDevRebuilds =
-          api.context.action === 'dev' &&
-          startPluginOpts.rsbuild?.concurrentDevRebuilds !== false &&
-          serverFnProviderEnv === RSBUILD_ENVIRONMENT_NAMES.server
-
         api.onAfterCreateCompiler(({ compiler }) => {
           // MultiCompiler has a `compilers` array; single compiler does not
           if ('compilers' in compiler) {
