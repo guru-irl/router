@@ -54,9 +54,9 @@ export type TanStackStartRsbuildInputConfig = z.input<
      * With `installDevServerMiddleware: false`, a custom dev server should do
      * the same before each request: await `environments.ssr.getStats()`, then
      * `environments.client.getStats()`, then call
-     * `environments.ssr.loadBundle()`. If the client compiler fails before it
-     * finishes a build, requests wait for the next client build that
-     * finishes.
+     * `environments.ssr.loadBundle()`. If the client build fails with a fatal
+     * error rather than a module error, Rspack stops watching the client, so
+     * requests wait until you restart the dev server.
      *
      * @default true
      */
