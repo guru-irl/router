@@ -73,6 +73,8 @@ async function startDevServer(opts: { waitForClientBuild: boolean }) {
     },
   } as any)
   ;(afterBuiltIns as () => void)()
+  // The second middleware is the SSR catch-all that runs after Rsbuild's
+  // built-in middlewares.
   const handleSSR = middlewares[1]!
 
   let receiveRequest!: () => void

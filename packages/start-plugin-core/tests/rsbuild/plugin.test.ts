@@ -151,7 +151,7 @@ async function countClientStatsReads(opts: {
     { mergeRsbuildConfig: mergeConfig },
   )
 
-  const getClientStats = vi.fn(async () => ({}))
+  const getClientStats = vi.fn(() => Promise.resolve({}))
   const middlewares: Array<
     (req: unknown, res: unknown, next: () => void) => unknown
   > = []
@@ -166,15 +166,18 @@ async function countClientStatsReads(opts: {
       environments: {
         client: { getStats: getClientStats },
         ssr: {
-          getStats: async () => ({}),
-          loadBundle: async () => ({
-            default: { fetch: () => new Response('rendered') },
-          }),
+          getStats: () => Promise.resolve({}),
+          loadBundle: () =>
+            Promise.resolve({
+              default: { fetch: () => new Response('rendered') },
+            }),
         },
       },
     },
   })()
 
+  // The second middleware is the SSR catch-all that runs after Rsbuild's
+  // built-in middlewares.
   const server = createServer((req, res) => {
     void middlewares[1]!(req, res, () => {})
   })
