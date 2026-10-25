@@ -48,6 +48,16 @@ export type TanStackStartRsbuildInputConfig = z.input<
      * client environment instead of after it. The first build still runs the
      * server after the client.
      *
+     * The client build updates the manifest that server rendering reads, and
+     * the server build can finish first. So the built-in dev middleware waits
+     * for the server build and then for the client build before it renders.
+     * With `installDevServerMiddleware: false`, a custom dev server should do
+     * the same before each request: await `environments.ssr.getStats()`, then
+     * `environments.client.getStats()`, then call
+     * `environments.ssr.loadBundle()`. If the client compiler fails before it
+     * finishes a build, requests wait for the next client build that
+     * finishes.
+     *
      * @default true
      */
     concurrentDevRebuilds?: boolean
