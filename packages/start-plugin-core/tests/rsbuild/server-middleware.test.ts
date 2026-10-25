@@ -13,23 +13,48 @@ type Middleware = (
 let server: Server | undefined
 
 afterEach(async () => {
-  await new Promise((resolve) => server?.close(resolve))
-  server = undefined
+  if (server) {
+    await new Promise((resolve) => server!.close(resolve))
+    server = undefined
+  }
 })
+
+const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+// Like an Rsbuild dev environment: `getStats()` and `loadBundle()` wait for a
+// build that runs from `watchRun` to `done`.
+function createEnvironment(name: string, events: Array<string>) {
+  let build = Promise.resolve()
+  let finishBuild = () => {}
+  return {
+    watchRun() {
+      build = new Promise<void>((resolve) => {
+        finishBuild = () => {
+          events.push(`${name} built`)
+          resolve()
+        }
+      })
+    },
+    done: () => finishBuild(),
+    getStats: () => build,
+    loadBundle: async () => {
+      await build
+      return {
+        default: {
+          fetch: () => {
+            events.push('rendered')
+            return new Response('rendered')
+          },
+        },
+      }
+    },
+  }
+}
 
 async function startDevServer(opts: { waitForClientBuild: boolean }) {
   const events: Array<string> = []
-  let clientStatsRequested!: () => void
-  const requested = new Promise<void>((resolve) => {
-    clientStatsRequested = resolve
-  })
-  let finishClientBuild!: () => void
-  const clientBuild = new Promise<void>((resolve) => {
-    finishClientBuild = () => {
-      events.push('client built')
-      resolve()
-    }
-  })
+  const client = createEnvironment('client', events)
+  const ssr = createEnvironment('ssr', events)
 
   const middlewares: Array<Middleware> = []
   const setup = createServerSetup({
@@ -44,27 +69,18 @@ async function startDevServer(opts: { waitForClientBuild: boolean }) {
       middlewares: {
         use: (middleware: Middleware) => middlewares.push(middleware),
       },
-      environments: {
-        client: {
-          getStats: () => {
-            events.push('client stats requested')
-            clientStatsRequested()
-            return clientBuild
-          },
-        },
-        ssr: {
-          loadBundle: async () => {
-            events.push('server bundle loaded')
-            return { default: { fetch: () => new Response('rendered') } }
-          },
-        },
-      },
+      environments: { client, ssr },
     },
   } as any)
   ;(afterBuiltIns as () => void)()
   const handleSSR = middlewares[1]!
 
+  let receiveRequest!: () => void
+  const received = new Promise<void>((resolve) => {
+    receiveRequest = resolve
+  })
   server = createServer((req, res) => {
+    receiveRequest()
     void handleSSR(req, res, (error) => {
       res.statusCode = 500
       res.end(String(error))
@@ -74,35 +90,54 @@ async function startDevServer(opts: { waitForClientBuild: boolean }) {
   const { port } = server.address() as AddressInfo
 
   return {
-    url: `http://localhost:${port}/`,
     events,
-    requested,
-    finishClientBuild,
+    client,
+    ssr,
+    // Resolves once the middleware has started handling the request.
+    request: async () => {
+      const response = fetch(`http://localhost:${port}/`).then((res) =>
+        res.text(),
+      )
+      await received
+      await flush()
+      return { response }
+    },
   }
 }
 
 describe('createServerSetup', () => {
   test('renders a dev request after the client build in progress', async () => {
     const dev = await startDevServer({ waitForClientBuild: true })
+    dev.client.watchRun()
 
-    const response = fetch(dev.url)
-    await Promise.race([dev.requested, response])
-    dev.finishClientBuild()
+    const { response } = await dev.request()
+    dev.client.done()
 
-    expect(await (await response).text()).toBe('rendered')
-    expect(dev.events).toEqual([
-      'client stats requested',
-      'client built',
-      'server bundle loaded',
-    ])
+    expect(await response).toBe('rendered')
+    expect(dev.events).toEqual(['client built', 'rendered'])
+  })
+
+  test('renders a dev request after a client build that starts while the server builds', async () => {
+    const dev = await startDevServer({ waitForClientBuild: true })
+    dev.ssr.watchRun()
+
+    const { response } = await dev.request()
+    dev.client.watchRun()
+    dev.ssr.done()
+    await flush()
+    dev.client.done()
+
+    expect(await response).toBe('rendered')
+    expect(dev.events).toEqual(['ssr built', 'client built', 'rendered'])
   })
 
   test('does not wait for the client build when the builds are ordered', async () => {
     const dev = await startDevServer({ waitForClientBuild: false })
+    dev.client.watchRun()
 
-    const response = await fetch(dev.url)
+    const { response } = await dev.request()
 
-    expect(await response.text()).toBe('rendered')
-    expect(dev.events).toEqual(['server bundle loaded'])
+    expect(await response).toBe('rendered')
+    expect(dev.events).toEqual(['rendered'])
   })
 })

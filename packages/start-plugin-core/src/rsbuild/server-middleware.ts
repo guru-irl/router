@@ -75,20 +75,23 @@ async function loadDevFetchHandler(
     throw new Error('Cannot load Rsbuild dev SSR bundle outside dev mode')
   }
 
-  // The client build updates the dev manifest, and the server build can
-  // finish first.
-  if (waitForClientBuild) {
-    await context.server.environments[
-      RSBUILD_ENVIRONMENT_NAMES.client
-    ]?.getStats()
-  }
-
   const ssrEnv = context.server.environments[RSBUILD_ENVIRONMENT_NAMES.server]
 
   if (!ssrEnv) {
     throw new Error(
       `SSR environment "${RSBUILD_ENVIRONMENT_NAMES.server}" not found`,
     )
+  }
+
+  // The client build updates the dev manifest, and the server build can
+  // finish first. The server merges server functions only after the client
+  // build for the same edit has started, so wait for the server, then for the
+  // client.
+  if (waitForClientBuild) {
+    await ssrEnv.getStats()
+    await context.server.environments[
+      RSBUILD_ENVIRONMENT_NAMES.client
+    ]?.getStats()
   }
 
   const serverEntry = await ssrEnv.loadBundle<{ default: ServerEntry }>('index')
