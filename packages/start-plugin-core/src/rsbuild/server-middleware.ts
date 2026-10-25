@@ -69,6 +69,7 @@ function restorePreviewUrl(opts: {
 
 async function loadDevFetchHandler(
   context: ServerSetupContext,
+  waitForClientBuild: boolean,
 ): Promise<FetchHandler> {
   if (context.action !== 'dev') {
     throw new Error('Cannot load Rsbuild dev SSR bundle outside dev mode')
@@ -80,6 +81,17 @@ async function loadDevFetchHandler(
     throw new Error(
       `SSR environment "${RSBUILD_ENVIRONMENT_NAMES.server}" not found`,
     )
+  }
+
+  // The client build updates the dev manifest, and the server build can
+  // finish first. The server merges server functions only after the client
+  // build for the same edit has started, so wait for the server, then for the
+  // client.
+  if (waitForClientBuild) {
+    await ssrEnv.getStats()
+    await context.server.environments[
+      RSBUILD_ENVIRONMENT_NAMES.client
+    ]?.getStats()
   }
 
   const serverEntry = await ssrEnv.loadBundle<{ default: ServerEntry }>('index')
@@ -111,6 +123,7 @@ export function createServerSetup(opts: {
   serverFnBasePath: string
   serverOutputDirectory: string
   publicBase: string
+  waitForClientBuild: boolean
 }): ServerSetupFn {
   let previewFetchHandlerPromise: Promise<FetchHandler> | undefined
 
@@ -131,7 +144,7 @@ export function createServerSetup(opts: {
       try {
         const fetchHandler =
           context.action === 'dev'
-            ? await loadDevFetchHandler(context)
+            ? await loadDevFetchHandler(context, opts.waitForClientBuild)
             : await getPreviewFetchHandler()
 
         if (context.action === 'preview') {
