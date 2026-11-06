@@ -82,9 +82,14 @@ function resolveMetadataLoader(): string {
 function readServerFnBuildInfo(
   module: Rspack.Module,
 ): Record<string, ServerFn> | null {
-  const result = serverFnBuildInfoSchema.safeParse(
-    module.buildInfo[SERVER_FN_BUILD_INFO_FIELD],
-  )
+  const value = module.buildInfo[SERVER_FN_BUILD_INFO_FIELD]
+  // The replay visits every module, and almost none carry metadata. Skip
+  // validation for those, since a failed parse is far slower than this check.
+  if (value === undefined) {
+    return null
+  }
+
+  const result = serverFnBuildInfoSchema.safeParse(value)
   if (!result.success) {
     return null
   }

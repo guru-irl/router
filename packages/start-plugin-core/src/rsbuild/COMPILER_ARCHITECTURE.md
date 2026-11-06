@@ -117,7 +117,7 @@ Each relevant compiler installs a `finishMake` hook at stage `-20`.
 At that point Rspack has built or restored the module graph for the environment, and module `buildInfo` is available. The hook:
 
 1. Iterates over `compilation.modules`.
-2. Reads `module.buildInfo['tanstack.start.serverFns']`.
+2. Reads `module.buildInfo['tanstack.start.serverFns']` and skips modules without it.
 3. Validates the payload with the versioned schema.
 4. Merges valid module metadata into an environment snapshot.
 5. Stores the snapshot in `serverFnsByEnvironment`.
