@@ -14,6 +14,7 @@ export const tanstackStartRsbuildOptionsSchema =
       rsbuild: z
         .object({
           installDevServerMiddleware: z.boolean().optional(),
+          concurrentDevRebuilds: z.boolean().optional(),
           client: z
             .object({
               output: rsbuildClientOutputSchema.optional().default('module'),
@@ -42,6 +43,24 @@ export type TanStackStartRsbuildInputConfig = z.input<
 > & {
   rsbuild?: {
     installDevServerMiddleware?: boolean
+    /**
+     * In development, rebuild the server environment at the same time as the
+     * client environment instead of after it. The first build still runs the
+     * server after the client.
+     *
+     * The client build updates the manifest that server rendering reads, and
+     * the server build can finish first. So the built-in dev middleware waits
+     * for the server build and then for the client build before it renders.
+     * With `installDevServerMiddleware: false`, a custom dev server should do
+     * the same before each request: await `environments.ssr.getStats()`, then
+     * `environments.client.getStats()`, then call
+     * `environments.ssr.loadBundle()`. If the client build fails with a fatal
+     * error rather than a module error, Rspack stops watching the client, so
+     * requests wait until you restart the dev server.
+     *
+     * @default true
+     */
+    concurrentDevRebuilds?: boolean
     client?: {
       output?: z.input<typeof rsbuildClientOutputSchema>
     }

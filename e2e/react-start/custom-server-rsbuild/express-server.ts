@@ -29,10 +29,20 @@ if (DEVELOPMENT) {
   })
 
   const devServer = await rsbuild.createDevServer()
+  const { client, ssr } = devServer.environments
 
-  const serverEntry =
-    await devServer.environments.ssr.loadBundle<FetchServerEntry>('index')
-  const handler = toNodeHandler(serverEntry.default.fetch) as NodeHttp1Handler
+  // The client build updates the manifest that server rendering reads, and
+  // the server build can finish first. Wait for the server build, then the
+  // client build, before each request.
+  const handler: NodeHttp1Handler = async (req, res) => {
+    await ssr.getStats()
+    await client.getStats()
+    const serverEntry = await ssr.loadBundle<FetchServerEntry>('index')
+    const nodeHandler = toNodeHandler(
+      serverEntry.default.fetch,
+    ) as NodeHttp1Handler
+    await nodeHandler(req, res)
+  }
 
   // Intercept server-fn URLs BEFORE rsbuild's built-in middlewares so they
   // don't get swallowed by htmlCompletion/assetsMiddleware — long base64
