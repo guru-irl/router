@@ -262,6 +262,9 @@ export function createRouterCodeSplitterPlugin(
           id: {
             // this is necessary for webpack / rspack to avoid matching .html files
             include: /\.(m|c)?(j|t)sx?$/,
+            // only route files known to the generator are transformed, and
+            // they are app source, so skip dependency modules
+            exclude: /[\\/]node_modules[\\/]/,
           },
           code: {
             include: routeFactoryCallCodeFilter,
