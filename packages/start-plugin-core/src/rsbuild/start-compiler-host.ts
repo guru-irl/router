@@ -16,6 +16,7 @@ import { createHydrateCompilerPlugin } from '../hydrate-when-transform'
 import {
   SERVER_FN_BUILD_INFO_CONTEXT_KEY,
   SERVER_FN_BUILD_INFO_FIELD,
+  hasServerFns,
 } from './start-compiler-metadata'
 import type { RsbuildPluginAPI, Rspack } from '@rsbuild/core'
 import type {
@@ -144,6 +145,10 @@ export function registerStartCompilerTransforms(
   const transformContextStorage =
     new AsyncLocalStorage<RsbuildTransformContext>()
   const serverFnMetadataByEnvironment = new Map<string, ServerFnMetadataById>()
+  const resourcesWithServerFnMetadataByEnvironment = new Map<
+    string,
+    Set<string>
+  >()
   const serverFnsByEnvironment = new Map<string, Record<string, ServerFn>>()
   const serverFnsById = opts.serverFnsById ?? {}
   const getRoot = () =>
@@ -157,6 +162,17 @@ export function registerStartCompilerTransforms(
     }
 
     return metadataById
+  }
+  const getResourcesWithServerFnMetadata = (environmentName: string) => {
+    let resources =
+      resourcesWithServerFnMetadataByEnvironment.get(environmentName)
+
+    if (!resources) {
+      resources = new Set()
+      resourcesWithServerFnMetadataByEnvironment.set(environmentName, resources)
+    }
+
+    return resources
   }
   const runCompilerTask = async <T>(
     environmentName: string,
@@ -218,6 +234,9 @@ export function registerStartCompilerTransforms(
           loader: metadataLoader,
           options: {
             metadataById: getServerFnMetadata(utils.environment.name),
+            resourcesWithMetadata: getResourcesWithServerFnMetadata(
+              utils.environment.name,
+            ),
           },
         },
       ],
@@ -437,11 +456,21 @@ export function registerStartCompilerTransforms(
           },
           (compilation) => {
             const restoredServerFnsById: Record<string, ServerFn> = {}
+            const resourcesWithMetadata = getResourcesWithServerFnMetadata(
+              utils.environment.name,
+            )
 
             for (const module of compilation.modules) {
               const metadata = readServerFnBuildInfo(module)
               if (!metadata) {
                 continue
+              }
+
+              // Modules restored from the cache skip the metadata loader, so
+              // record them here for it to clear once they are rebuilt.
+              const resource = (module as { resource?: unknown }).resource
+              if (typeof resource === 'string' && hasServerFns(metadata)) {
+                resourcesWithMetadata.add(resource)
               }
 
               mergeServerFnsById(restoredServerFnsById, metadata)

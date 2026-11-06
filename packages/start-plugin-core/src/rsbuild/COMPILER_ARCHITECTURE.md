@@ -110,6 +110,10 @@ If a module previously contained server functions and then no longer produces me
 
 This prevents stale server-function entries from surviving on a cached module's `buildInfo` after a file edit removes or renames server functions.
 
+Rspack keeps a module's custom `buildInfo` fields across rebuilds in the same process, so this clearing is required in watch mode. A module rebuilt in a new process starts with fresh `buildInfo`.
+
+The loader therefore only calls the setter for a module that has new metadata or still carries metadata from an earlier build. Start tracks the second group per environment by resource: the loader records modules it writes metadata to, and the warm cache replay records restored modules. Every other module is left untouched, so its `buildInfo` is never read or written.
+
 ## Warm Cache Replay
 
 Each relevant compiler installs a `finishMake` hook at stage `-20`.
